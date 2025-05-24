@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kibana
+spec:
+  type: NodePort
+  ports:
+  - name: http
+    port: 5601
+    protocol: TCP
+    targetPort: 5601
+    nodePort: 30562
+  selector:
+    io.kompose.service: kibana
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kibana-cm1
+data:
+  opensearch_dashboards.yml: |
+    server.host: "0.0.0.0"
+    server.name: kibana
+    opensearch.hosts: ["http://os01:9200", "http://os02:9200", "http://os03:9200"\]
+    opensearch.ssl.verificationMode: none
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    io.kompose.service: kibana
+  name: kibana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: kibana
+  template:
+    metadata:
+      labels:
+        io.kompose.service: kibana
+    spec:
+      containers:
+      - name: kibana
+        image: opensearchproject/opensearch-dashboards:3
+        env:
+        - name: DISABLE_SECURITY_DASHBOARDS_PLUGIN
+          value: "true"
+        - name: OPENSEARCH_HOSTS
+          value: '["http://os01:9200","http://os02:9200","http://os03:9200"]'
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1"
+        ports:
+        - containerPort: 5601
+          protocol: TCP
+        volumeMounts:
+        - mountPath: /usr/share/opensearch-dashboards/config/opensearch_dashboards.yml
+          name: kibana-cm1
+          subPath: opensearch_dashboards.yml
+      volumes:
+      - configMap:
+          items:
+          - key: opensearch_dashboards.yml
+            path: opensearch_dashboards.yml
+          name: kibana-cm1
+        name: kibana-cm1

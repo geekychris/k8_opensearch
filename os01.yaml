@@ -1,0 +1,128 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: os01
+spec:
+  ports:
+  - name: http
+    port: 9200
+    targetPort: 9200
+  - name: transport
+    port: 9300
+    targetPort: 9300
+  selector:
+    io.kompose.service: os01
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    io.kompose.service: os01
+  name: os01
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: os01
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.service: os01
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      initContainers:
+      - name: permissions-init
+        image: busybox:1.35
+        command:
+        - /bin/sh
+        - -c
+        - |
+          umask 077
+          mkdir -p /usr/share/opensearch/config/certificates/{os01,os02,os03,ca} /usr/share/opensearch/data
+          mkdir -p /usr/share/opensearch/logs
+          chown -R 1000:1000 /usr/share/opensearch
+          find /usr/share/opensearch/config -type d -exec chmod 700 {} \;
+          find /usr/share/opensearch/config -type f -exec chmod 600 {} \;
+          find /usr/share/opensearch/data -type d -exec chmod 700 {} \;
+          find /usr/share/opensearch/logs -type d -exec chmod 700 {} \;
+          chmod 700 /usr/share/opensearch/config
+          chmod 600 /usr/share/opensearch/config/opensearch.yml
+        securityContext:
+          runAsUser: 0
+          capabilities:
+            add:
+            - CHOWN
+            - FOWNER
+            - DAC_OVERRIDE
+        volumeMounts:
+        - mountPath: /usr/share/opensearch/config
+          name: os01-cm0
+        - mountPath: /usr/share/opensearch/config/certificates
+          name: certificates-volume
+        - mountPath: /usr/share/opensearch/data
+          name: os-data
+      containers:
+      - name: os01
+        image: opensearchproject/opensearch:3
+        securityContext:
+          runAsUser: 1000
+          runAsNonRoot: true
+        env:
+        - name: DISABLE_INSTALL_DEMO_CONFIG
+          value: "true"
+        - name: DISABLE_SECURITY_PLUGIN
+          value: "true"
+        - name: OPENSEARCH_JAVA_OPTS
+          value: "-XX:UseSVE=0 -Xms1g -Xmx1g -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/usr/share/opensearch/data"
+        - name: bootstrap.memory_lock
+          value: "false"
+        - name: cluster.name
+          value: os-cluster
+        - name: cluster.initial_master_nodes
+          value: "os01,os02,os03"
+        - name: discovery.seed_hosts
+          value: "os01,os02,os03"
+        - name: network.host
+          value: "0.0.0.0"
+        - name: node.name
+          value: os01
+        - name: node.roles
+          value: "data,ingest,master"
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1"
+        ports:
+        - containerPort: 9200
+          protocol: TCP
+        - containerPort: 9300
+          protocol: TCP
+        volumeMounts:
+        - mountPath: /usr/share/opensearch/config/opensearch.yml
+          name: os01-cm0
+          subPath: opensearch.yml
+        - mountPath: /usr/share/opensearch/config/certificates
+          name: certificates-volume
+        - mountPath: /usr/share/opensearch/data
+          name: os-data
+      volumes:
+      - configMap:
+          items:
+          - key: opensearch.yml
+            path: opensearch.yml
+          name: os01-cm0
+        name: os01-cm0
+      - name: certificates-volume
+        persistentVolumeClaim:
+          claimName: certificates-pvc
+      - name: os-data
+        persistentVolumeClaim:
+          claimName: os-data1

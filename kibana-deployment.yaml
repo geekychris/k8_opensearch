@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: kompose --file docker-compose.yml convert
+    kompose.version: 1.35.0 (HEAD)
+  labels:
+    io.kompose.service: kibana
+  name: kibana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: kibana
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: kompose --file docker-compose.yml convert
+        kompose.version: 1.35.0 (HEAD)
+      labels:
+        io.kompose.service: kibana
+    spec:
+      containers:
+        - env:
+            - name: DISABLE_INSTALL_DEMO_CONFIG
+              value: "true"
+            - name: OPENSEARCH_HOSTS
+              value: '["https://os01:9200","https://os02:9200","https://os03:9200"]'
+          image: opensearchproject/opensearch-dashboards:3
+          name: kibana
+          ports:
+            - containerPort: 5601
+              protocol: TCP
+          volumeMounts:
+            - mountPath: /usr/share/opensearch-dashboards/config/opensearch_dashboards.yml
+              name: kibana-cm1
+              subPath: opensearch_dashboards.yml
+            - mountPath: /usr/share/opensearch-dashboards/config/certificates
+              name: certificates-volume
+      restartPolicy: Always
+      volumes:
+        - configMap:
+            items:
+              - key: opensearch-dashboards.yml
+                path: opensearch_dashboards.yml
+            name: kibana-cm1
+          name: kibana-cm1
+        - name: certificates-volume
+          persistentVolumeClaim:
+            claimName: certificates-pvc

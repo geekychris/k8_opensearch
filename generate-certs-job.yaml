@@ -1,0 +1,95 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: generate-certificates
+spec:
+  template:
+    spec:
+      securityContext:
+        runAsUser: 0  # Run as root to handle permissions
+        fsGroup: 1000  # OpenSearch group
+        fsGroupChangePolicy: "OnRootMismatch"
+      containers:
+      - name: cert-generator
+        image: ubuntu:latest
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "200m"
+        command:
+        - /bin/bash
+        - -c
+        - |
+          apt-get update && apt-get install -y openssl
+          cd /certs-output
+          
+          # Create certificate directories
+          mkdir -p {ca,os-dashboards,os01,os02,os03}
+          
+          # Root CA
+          openssl genrsa -out ca/ca.key 2048
+          openssl req -new -x509 -sha256 -days 1095 -subj "/C=FR/ST=IDF/L=PARIS/O=EXAMPLE/CN=CA" -key ca/ca.key -out ca/ca.pem
+          
+          # Admin
+          openssl genrsa -out ca/admin-temp.key 2048
+          openssl pkcs8 -inform PEM -outform PEM -in ca/admin-temp.key -topk8 -nocrypt -v1 PBE-SHA1-3DES -out ca/admin.key
+          openssl req -new -subj "/C=FR/ST=IDF/L=PARIS/O=EXAMPLE/CN=ADMIN" -key ca/admin.key -out ca/admin.csr
+          openssl x509 -req -in ca/admin.csr -CA ca/ca.pem -CAkey ca/ca.key -CAcreateserial -sha256 -out ca/admin.pem
+          
+          # OpenSearch Dashboards
+          openssl genrsa -out os-dashboards/os-dashboards-temp.key 2048
+          openssl pkcs8 -inform PEM -outform PEM -in os-dashboards/os-dashboards-temp.key -topk8 -nocrypt -v1 PBE-SHA1-3DES -out os-dashboards/os-dashboards.key
+          openssl req -new -subj "/C=FR/ST=IDF/L=PARIS/O=EXAMPLE/CN=os-dashboards" -key os-dashboards/os-dashboards.key -out os-dashboards/os-dashboards.csr
+          openssl x509 -req -in os-dashboards/os-dashboards.csr -CA ca/ca.pem -CAkey ca/ca.key -CAcreateserial -sha256 -out os-dashboards/os-dashboards.pem
+          rm os-dashboards/os-dashboards-temp.key os-dashboards/os-dashboards.csr
+          
+          # Nodes
+          for NODE_NAME in "os01" "os02" "os03"
+          do
+              openssl genrsa -out "$NODE_NAME/$NODE_NAME-temp.key" 2048
+              openssl pkcs8 -inform PEM -outform PEM -in "$NODE_NAME/$NODE_NAME-temp.key" -topk8 -nocrypt -v1 PBE-SHA1-3DES -out "$NODE_NAME/$NODE_NAME.key"
+              openssl req -new -subj "/C=FR/ST=IDF/L=PARIS/O=EXAMPLE/CN=$NODE_NAME" -key "$NODE_NAME/$NODE_NAME.key" -out "$NODE_NAME/$NODE_NAME.csr"
+              openssl x509 -req -extfile <(printf "subjectAltName=DNS:localhost,IP:127.0.0.1,DNS:$NODE_NAME") -in "$NODE_NAME/$NODE_NAME.csr" -CA ca/ca.pem -CAkey ca/ca.key -CAcreateserial -sha256 -out "$NODE_NAME/$NODE_NAME.pem"
+              rm "$NODE_NAME/$NODE_NAME-temp.key" "$NODE_NAME/$NODE_NAME.csr"
+          done
+          
+          echo "Setting permissions and ownership..."
+          
+          # Set base permissions for directories
+          find . -type d -exec chmod 0755 {} \;
+          
+          # Set permissions for certificates
+          find . -type f -name "*.pem" -exec chmod 0644 {} \;
+          find . -type f -name "*.key" -exec chmod 0600 {} \;
+          find . -type f -name "*.csr" -exec chmod 0644 {} \;
+          
+          # Explicitly set ownership using numeric IDs
+          chown -R 1000:1000 .
+          
+          echo "Verifying file ownership and permissions..."
+          find . -type f -ls
+          
+          echo "Testing access as OpenSearch user..."
+          # Test access as OpenSearch user
+          runuser -u '#1000' -- bash -c '
+            echo "Testing read access to certificates..."
+            cat */*/pem >/dev/null 2>&1 && echo "Certificate read: OK" || echo "Certificate read: FAILED"
+            echo "Testing read access to keys..."
+            cat */*/*.key >/dev/null 2>&1 && echo "Key read: OK" || echo "Key read: FAILED"
+          '
+          
+          echo "Final permission verification:"
+          ls -laR .
+          
+        volumeMounts:
+        - name: certs-volume
+          mountPath: /certs-output
+      restartPolicy: Never
+      volumes:
+      - name: certs-volume
+        persistentVolumeClaim:
+          claimName: certificates-pvc
+
