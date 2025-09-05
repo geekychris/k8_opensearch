@@ -72,6 +72,19 @@ Your Kubernetes cluster also has these other services available:
 
 ## 🔧 Configuration Details
 
+### **kubectl Detection**
+The deployment scripts automatically detect and use the appropriate kubectl command:
+- **Standard Kubernetes**: Uses `kubectl` command
+- **MicroK8s**: Uses `microk8s.kubectl` command
+- **Automatic**: No manual configuration needed
+
+When you run the scripts, you'll see:
+```bash
+./deploy-opensearch-minimal.sh
+# Output: Using kubectl command
+# OR: Using microk8s.kubectl command
+```
+
 ### **OpenSearch Configuration**
 - **Security Plugin**: Disabled (`DISABLE_SECURITY_PLUGIN=true`)
 - **Demo Config**: Disabled (`DISABLE_INSTALL_DEMO_CONFIG=true`)
@@ -201,8 +214,9 @@ For **production**, you should:
 ### **Compatibility**
 - **OpenSearch**: Version 3.0.0
 - **OpenSearch Dashboards**: Version 3.0.0 (Kibana-compatible interface)
-- **Kubernetes**: Tested on K3s v1.30.6
-- **Platform**: macOS with Rancher Desktop
+- **Kubernetes**: Tested on K3s v1.30.6, MicroK8s, and standard Kubernetes
+- **kubectl**: Automatically detects `kubectl` or `microk8s.kubectl`
+- **Platform**: macOS with Rancher Desktop (also works on Linux with MicroK8s)
 
 ---
 
