@@ -18,13 +18,25 @@
 
 set -e  # Exit on error
 
-echo "Shutting down OpenSearch Kubernetes services..."
+# Function to detect and set the kubectl command
+detect_kubectl() {
+    if command -v kubectl &> /dev/null; then
+        KUBECTL="kubectl"
+        echo "Using kubectl command"
+    elif command -v microk8s.kubectl &> /dev/null; then
+        KUBECTL="microk8s.kubectl"
+        echo "Using microk8s.kubectl command"
+    else
+        echo "Error: Neither kubectl nor microk8s.kubectl found"
+        echo "Please install kubectl or microk8s"
+        exit 1
+    fi
+}
 
-# Check for kubectl
-if ! command -v kubectl &> /dev/null; then
-    echo "Error: kubectl not found"
-    exit 1
-fi
+# Detect kubectl command
+detect_kubectl
+
+echo "Shutting down OpenSearch Kubernetes services..."
 
 # Function to safely delete resources
 delete_resource() {
@@ -32,7 +44,7 @@ delete_resource() {
     local resource_name=$2
     
     echo "Deleting $resource_type: $resource_name"
-    kubectl delete $resource_type $resource_name 2>/dev/null || {
+    $KUBECTL delete $resource_type $resource_name 2>/dev/null || {
         echo "  Warning: $resource_type $resource_name not found or already deleted"
     }
 }

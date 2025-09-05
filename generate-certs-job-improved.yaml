@@ -1,0 +1,115 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: generate-certificates-v2
+spec:
+  # Set active deadline to 10 minutes to prevent infinite hanging
+  activeDeadlineSeconds: 600
+  # Allow up to 3 retry attempts
+  backoffLimit: 3
+  template:
+    spec:
+      securityContext:
+        runAsUser: 0  # Run as root to handle permissions
+        fsGroup: 1000  # OpenSearch group
+        fsGroupChangePolicy: "OnRootMismatch"
+      containers:
+      - name: cert-generator
+        image: ubuntu:22.04  # Use specific version for consistency
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"  # Increased CPU limit
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -euo pipefail  # Exit on any error, undefined var, or pipe failure
+          
+          echo "Starting certificate generation at $(date)"
+          echo "Updating package lists with timeout..."
+          
+          # Set timeouts for apt operations
+          export DEBIAN_FRONTEND=noninteractive
+          
+          # Update with timeout and retry
+          timeout 300 apt-get update || {
+            echo "apt-get update failed, trying with different mirror..."
+            echo "deb http://archive.ubuntu.com/ubuntu/ jammy main restricted universe multiverse" > /etc/apt/sources.list
+            echo "deb http://archive.ubuntu.com/ubuntu/ jammy-updates main restricted universe multiverse" >> /etc/apt/sources.list
+            echo "deb http://security.ubuntu.com/ubuntu/ jammy-security main restricted universe multiverse" >> /etc/apt/sources.list
+            timeout 300 apt-get update
+          }
+          
+          echo "Installing OpenSSL..."
+          timeout 300 apt-get install -y openssl
+          
+          echo "Changing to certificates directory..."
+          cd /certs-output
+          
+          echo "Creating certificate directories..."
+          mkdir -p {ca,os-dashboards,os01,os02,os03}
+          
+          echo "Generating Root CA..."
+          openssl genrsa -out ca/ca.key 2048
+          openssl req -new -x509 -sha256 -days 1095 -subj "/C=FR/ST=IDF/L=PARIS/O=EXAMPLE/CN=CA" -key ca/ca.key -out ca/ca.pem
+          
+          echo "Generating Admin certificates..."
+          openssl genrsa -out ca/admin-temp.key 2048
+          openssl pkcs8 -inform PEM -outform PEM -in ca/admin-temp.key -topk8 -nocrypt -v1 PBE-SHA1-3DES -out ca/admin.key
+          openssl req -new -subj "/C=FR/ST=IDF/L=PARIS/O=EXAMPLE/CN=ADMIN" -key ca/admin.key -out ca/admin.csr
+          openssl x509 -req -in ca/admin.csr -CA ca/ca.pem -CAkey ca/ca.key -CAcreateserial -sha256 -out ca/admin.pem -days 1095
+          rm ca/admin-temp.key ca/admin.csr
+          
+          echo "Generating OpenSearch Dashboards certificates..."
+          openssl genrsa -out os-dashboards/os-dashboards-temp.key 2048
+          openssl pkcs8 -inform PEM -outform PEM -in os-dashboards/os-dashboards-temp.key -topk8 -nocrypt -v1 PBE-SHA1-3DES -out os-dashboards/os-dashboards.key
+          openssl req -new -subj "/C=FR/ST=IDF/L=PARIS/O=EXAMPLE/CN=os-dashboards" -key os-dashboards/os-dashboards.key -out os-dashboards/os-dashboards.csr
+          openssl x509 -req -in os-dashboards/os-dashboards.csr -CA ca/ca.pem -CAkey ca/ca.key -CAcreateserial -sha256 -out os-dashboards/os-dashboards.pem -days 1095
+          rm os-dashboards/os-dashboards-temp.key os-dashboards/os-dashboards.csr
+          
+          echo "Generating node certificates..."
+          for NODE_NAME in "os01" "os02" "os03"
+          do
+              echo "Generating certificate for $NODE_NAME..."
+              openssl genrsa -out "$NODE_NAME/$NODE_NAME-temp.key" 2048
+              openssl pkcs8 -inform PEM -outform PEM -in "$NODE_NAME/$NODE_NAME-temp.key" -topk8 -nocrypt -v1 PBE-SHA1-3DES -out "$NODE_NAME/$NODE_NAME.key"
+              openssl req -new -subj "/C=FR/ST=IDF/L=PARIS/O=EXAMPLE/CN=$NODE_NAME" -key "$NODE_NAME/$NODE_NAME.key" -out "$NODE_NAME/$NODE_NAME.csr"
+              openssl x509 -req -extfile <(printf "subjectAltName=DNS:localhost,IP:127.0.0.1,DNS:$NODE_NAME") -in "$NODE_NAME/$NODE_NAME.csr" -CA ca/ca.pem -CAkey ca/ca.key -CAcreateserial -sha256 -out "$NODE_NAME/$NODE_NAME.pem" -days 1095
+              rm "$NODE_NAME/$NODE_NAME-temp.key" "$NODE_NAME/$NODE_NAME.csr"
+          done
+          
+          echo "Setting permissions and ownership..."
+          # Set base permissions for directories
+          find . -type d -exec chmod 0755 {} \;
+          
+          # Set permissions for certificates
+          find . -type f -name "*.pem" -exec chmod 0644 {} \;
+          find . -type f -name "*.key" -exec chmod 0600 {} \;
+          
+          # Set ownership - use numeric IDs to avoid user lookup issues
+          chown -R 1000:1000 . || {
+            echo "Warning: Could not set ownership to 1000:1000, trying root ownership..."
+            chown -R 0:0 .
+            chmod -R o+r .
+            find . -name "*.key" -exec chmod 600 {} \;
+          }
+          
+          echo "Certificate generation completed successfully at $(date)"
+          echo "Generated certificates:"
+          find . -name "*.pem" -o -name "*.key" | sort
+          
+          echo "Final verification - checking file permissions:"
+          ls -laR .
+          
+        volumeMounts:
+        - name: certs-volume
+          mountPath: /certs-output
+      restartPolicy: Never
+      volumes:
+      - name: certs-volume
+        persistentVolumeClaim:
+          claimName: certificates-pvc
