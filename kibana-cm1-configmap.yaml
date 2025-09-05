@@ -4,17 +4,12 @@ data:
     server.name: os_dashboards
     server.host: "0.0.0.0"
 
-    opensearch.username: "admin"
-    opensearch.password: "admin"
-
-    # Encrypt traffic between the browser and OpenSearch-Dashboards
-    server.ssl.enabled: true
-    server.ssl.certificate: "/usr/share/opensearch-dashboards/config/certificates/os-dashboards/os-dashboards.pem"
-    server.ssl.key: "/usr/share/opensearch-dashboards/config/certificates/os-dashboards/os-dashboards.key"
-
-    # Encrypt traffic between OpenSearch-Dashboards and Opensearch
-    opensearch.ssl.certificateAuthorities: ["/usr/share/opensearch-dashboards/config/certificates/ca/ca.pem"]
-    opensearch.ssl.verificationMode: full
+    # Connect to OpenSearch using HTTP (security plugin disabled)
+    opensearch.hosts: ["http://os01:9200", "http://os02:9200", "http://os03:9200"]
+    
+    # Disable SSL since security plugin is disabled
+    server.ssl.enabled: false
+    opensearch.ssl.verificationMode: none
 kind: ConfigMap
 metadata:
   annotations:

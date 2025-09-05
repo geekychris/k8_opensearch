@@ -1,160 +1,216 @@
 # OpenSearch Kubernetes Deployment
 
-This repository contains Kubernetes configurations for deploying OpenSearch cluster with OpenSearch Dashboards (formerly Kibana).
+This directory contains a complete OpenSearch cluster deployment for Kubernetes with a 3-node setup and OpenSearch Dashboards.
 
-## Prerequisites
+## 🚀 Quick Start
 
-- Kubernetes cluster (tested with Rancher Desktop)
-- kubectl command-line tool
-- At least 4GB of available memory for the cluster
-- Node with vm.max_map_count=262144 (can be set using `sudo sysctl -w vm.max_map_count=262144`)
-
-## Quick Start
-
-1. Clone this repository:
+### Deploy the Cluster
 ```bash
-git clone [repository-url]
-cd opensearch-docker-compose
+./deploy-opensearch-minimal.sh
 ```
 
-2. Set required system settings:
+### Shutdown the Cluster
 ```bash
-# On Linux/macOS
-sudo sysctl -w vm.max_map_count=262144
+./shutdown-opensearch.sh
 ```
 
-## Deployment Management
+## 📋 Services and Access Points
 
-### Starting the Cluster
+All services are exposed to your host computer via NodePort services:
 
-1. Create required persistent volumes and configmaps:
+### 🔍 **OpenSearch API**
+- **URL**: `http://localhost:30920`
+- **Service**: `os01` (primary node)
+- **Ports**: 
+  - `9200` (HTTP API) → `30920`
+  - `9300` (Transport) → `31160` 
+  - `9600` (Performance) → `32447`
+
+**Quick Tests:**
 ```bash
-kubectl apply -f pv-volume.yaml
-kubectl apply -f certificates-pvc.yaml
-kubectl apply -f os-data-pvc.yaml
-kubectl apply -f os-configmap.yaml
+# Cluster health
+curl http://localhost:30920/_cluster/health
+
+# Cluster info
+curl http://localhost:30920/
+
+# List indices
+curl http://localhost:30920/_cat/indices
 ```
 
-2. Deploy OpenSearch nodes and Kibana:
+### 📊 **OpenSearch Dashboards**
+- **URL**: `http://localhost:30561`
+- **Service**: `kibana` (OpenSearch Dashboards)
+- **Port**: `5601` → `30561`
+- **Authentication**: None (security plugin disabled)
+
+**Access:** Simply visit `http://localhost:30561` in your browser
+
+> **Note**: This is **OpenSearch Dashboards** (not traditional Kibana). It provides the same functionality as Kibana but is specifically designed for OpenSearch. It has the same UI, features, and capabilities you'd expect from Kibana.
+
+### 🗄️ **Additional Services Available**
+Your Kubernetes cluster also has these other services available:
+
+- **Redis**: `localhost:31379`
+- **MySQL**: `localhost:30306` 
+- **Kafka**: `localhost:31992` (primary), `31994` (SSL)
+- **Zookeeper**: `localhost:31181`
+
+## 🏗️ Architecture
+
+### **Cluster Configuration**
+- **Nodes**: 3 (os01, os02, os03)
+- **Replication**: Each node can serve as master, data, and ingest node
+- **Security**: Disabled for development (no SSL/TLS)
+- **Memory**: 2GB per node with 1GB heap
+- **Storage**: Persistent volumes for data
+
+### **Network Setup**
+- **Internal**: Nodes communicate via ClusterIP services on port 9300
+- **External**: os01 exposed via NodePort for API access
+- **Dashboards**: OpenSearch Dashboards connects to all three nodes
+
+## 🔧 Configuration Details
+
+### **OpenSearch Configuration**
+- **Security Plugin**: Disabled (`DISABLE_SECURITY_PLUGIN=true`)
+- **Demo Config**: Disabled (`DISABLE_INSTALL_DEMO_CONFIG=true`)
+- **Memory Lock**: Disabled for Kubernetes compatibility
+- **Discovery**: Uses service names for cluster formation
+
+### **OpenSearch Dashboards Configuration**
+- **Connection**: HTTP (no SSL) to all OpenSearch nodes
+- **Authentication**: Disabled (matches OpenSearch security settings)
+- **UI**: Full OpenSearch Dashboards functionality available
+
+## 📁 Important Files
+
+### **Deployment Scripts**
+- `deploy-opensearch-minimal.sh` - Main deployment script
+- `shutdown-opensearch.sh` - Clean shutdown script
+
+### **OpenSearch Node Deployments**
+- `os01-deployment.yaml` - Primary node (exposed externally)
+- `os02-deployment.yaml` - Secondary node  
+- `os03-deployment.yaml` - Tertiary node
+
+### **Services**
+- `os01-service.yaml` - NodePort service (external access)
+- `os02-service.yaml` - ClusterIP service (internal only)
+- `os03-service.yaml` - ClusterIP service (internal only)
+- `kibana-service.yaml` - NodePort service for Dashboards
+
+### **Configuration**
+- `os01-cm0-configmap.yaml` - OpenSearch node configuration
+- `os02-cm0-configmap.yaml` - OpenSearch node configuration  
+- `os03-cm0-configmap.yaml` - OpenSearch node configuration
+- `kibana-cm1-configmap.yaml` - OpenSearch Dashboards configuration
+
+## 🎯 Usage Examples
+
+### **Basic Data Operations**
 ```bash
-kubectl apply -f os01-deployment.yaml
-kubectl apply -f os02-deployment.yaml
-kubectl apply -f os03-deployment.yaml
-kubectl apply -f kibana-deployment.yaml
+# Create an index
+curl -X PUT "http://localhost:30920/my-index"
+
+# Index a document
+curl -X POST "http://localhost:30920/my-index/_doc" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello OpenSearch!", "timestamp": "2025-09-05"}'
+
+# Search documents
+curl "http://localhost:30920/my-index/_search"
 ```
 
-3. Monitor the deployment:
+### **Cluster Management**
 ```bash
-kubectl get pods -w
+# Check cluster health
+curl "http://localhost:30920/_cluster/health?pretty"
+
+# View cluster settings  
+curl "http://localhost:30920/_cluster/settings?pretty"
+
+# List all nodes
+curl "http://localhost:30920/_cat/nodes?v"
 ```
 
-### Port Forwarding
+## 🛠️ Troubleshooting
 
-The `manage-ports.sh` script handles port forwarding for accessing OpenSearch and Kibana:
+### **Common Issues**
 
+1. **Pods in CrashLoopBackOff**
+   - Check memory limits and requests
+   - Verify persistent volume availability
+   - Check init container logs
+
+2. **Can't Access Services**
+   - Verify NodePort services: `kubectl get svc`
+   - Check pod status: `kubectl get pods`
+   - Ensure ports aren't blocked by firewall
+
+3. **OpenSearch Dashboards Connection Issues**
+   - Verify OpenSearch is healthy: `curl http://localhost:30920/_cluster/health`
+   - Check Dashboards logs: `kubectl logs -l io.kompose.service=kibana`
+
+### **Useful Commands**
 ```bash
-# Start port forwarding
-./manage-ports.sh start
+# Check all services and their ports
+kubectl get svc
 
-# Check port forwarding status
-./manage-ports.sh status
+# Check all pods status
+kubectl get pods -o wide
 
-# Stop port forwarding
-./manage-ports.sh stop
+# View logs for specific service
+kubectl logs -l io.kompose.service=os01
+kubectl logs -l io.kompose.service=kibana
+
+# Alternative port forward (if needed)
+kubectl port-forward svc/os01 9200:9200
+kubectl port-forward svc/kibana 5601:5601
 ```
 
-### Service Access
+## ⚠️ Important Notes
 
-Once port forwarding is active, services are available at:
-- OpenSearch API: http://localhost:29201
-- Kibana Dashboard: http://localhost:25602
+### **OpenSearch Dashboards vs Kibana**
+This deployment uses **OpenSearch Dashboards**, which is:
+- A fork of Kibana specifically designed for OpenSearch
+- Provides identical functionality to Kibana (same UI, features, capabilities)
+- Compatible with OpenSearch (traditional Kibana 7.13+ cannot connect to OpenSearch)
+- Accessible at `http://localhost:30561`
 
-### Stopping the Cluster
+### **Development vs Production**
+This setup is configured for **development and testing**:
+- Security is disabled
+- Single replicas (no high availability)
+- Simplified networking
+- Basic resource allocation
 
-1. Stop port forwarding:
-```bash
-./manage-ports.sh stop
-```
+For **production**, you should:
+- Enable security and authentication
+- Use StatefulSets instead of Deployments
+- Configure proper resource limits and requests
+- Set up monitoring and alerting
+- Use LoadBalancer or Ingress instead of NodePort
+- Enable backup and restore procedures
 
-2. Delete the deployments:
-```bash
-kubectl delete -f os01-deployment.yaml
-kubectl delete -f os02-deployment.yaml
-kubectl delete -f os03-deployment.yaml
-kubectl delete -f kibana-deployment.yaml
-```
+### **Data Persistence**
+- Data is stored in persistent volumes
+- Running `./shutdown-opensearch.sh` **WILL DELETE** all data
+- For data retention, backup indices before shutdown
 
-3. Optionally, delete persistent volumes and configs:
-```bash
-kubectl delete -f os-configmap.yaml
-kubectl delete -f os-data-pvc.yaml
-kubectl delete -f certificates-pvc.yaml
-kubectl delete -f pv-volume.yaml
-```
+### **Compatibility**
+- **OpenSearch**: Version 3.0.0
+- **OpenSearch Dashboards**: Version 3.0.0 (Kibana-compatible interface)
+- **Kubernetes**: Tested on K3s v1.30.6
+- **Platform**: macOS with Rancher Desktop
 
-## Cluster Architecture
+---
 
-The deployment consists of:
-- 3 OpenSearch nodes (os01, os02, os03) in a cluster
-- 1 Kibana instance
-- Persistent storage for data and certificates
-- Internal services for cluster communication
+## 🎉 Ready to Use!
 
-### Port Configuration
+Your OpenSearch cluster is now fully operational with external access:
 
-| Service    | Internal Port | Forwarded Port | Description |
-|------------|--------------|----------------|-------------|
-| OpenSearch | 9200         | 29201          | REST API endpoint |
-| OpenSearch | 9300         | -              | Inter-node communication |
-| Kibana     | 5601         | 25602          | Dashboard interface |
+1. **OpenSearch API**: `http://localhost:30920`
+2. **OpenSearch Dashboards**: `http://localhost:30561`
 
-## Maintenance
-
-### Checking Cluster Health
-
-```bash
-# Using curl through port forward
-curl http://localhost:29201/_cluster/health
-
-# Using kubectl directly
-kubectl exec -it $(kubectl get pod -l io.kompose.service=os01 -o name) -- curl -s http://localhost:9200/_cluster/health
-```
-
-### Viewing Logs
-
-```bash
-# OpenSearch node logs
-kubectl logs -f $(kubectl get pod -l io.kompose.service=os01 -o name)
-
-# Kibana logs
-kubectl logs -f $(kubectl get pod -l io.kompose.service=kibana -o name)
-```
-
-## Security Notes
-
-- Current deployment has security plugin disabled for development purposes
-- For production deployment, enable security plugin and configure proper authentication
-- Use proper resource limits based on your environment
-
-## Troubleshooting
-
-### Common Issues
-
-1. Pods not starting:
-   - Check system resources
-   - Verify vm.max_map_count setting
-   - Check pod logs using `kubectl logs`
-
-2. Port forwarding issues:
-   - Use `manage-ports.sh status` to check current status
-   - Stop and restart port forwarding
-   - Check for port conflicts with other services
-
-### Getting Help
-
-For issues:
-1. Check pod logs
-2. Check cluster health
-3. Verify port forwarding status
-4. Review Kubernetes events: `kubectl get events --sort-by='.metadata.creationTimestamp'`
-
+Visit the Dashboards URL in your browser to start exploring and visualizing your data with the full power of the Kibana-compatible interface!

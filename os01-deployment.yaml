@@ -23,38 +23,6 @@ spec:
         runAsUser: 1000
         runAsGroup: 1000
         fsGroup: 1000
-      initContainers:
-      - name: permissions-init
-        image: busybox:1.35
-        command:
-        - /bin/sh
-        - -c
-        - |
-          umask 077
-          mkdir -p /usr/share/opensearch/config/certificates/{os01,os02,os03,ca} /usr/share/opensearch/data
-          mkdir -p /usr/share/opensearch/logs
-          chown -R 1000:1000 /usr/share/opensearch
-          find /usr/share/opensearch/config -type d -exec chmod 700 {} \;
-          find /usr/share/opensearch/config -type f -exec chmod 600 {} \;
-          find /usr/share/opensearch/data -type d -exec chmod 700 {} \;
-          find /usr/share/opensearch/logs -type d -exec chmod 700 {} \;
-          chmod 700 /usr/share/opensearch/config
-          chmod 600 /usr/share/opensearch/config/opensearch.yml
-          find /usr/share/opensearch/config/certificates -type f \( -name "*.pem" -o -name "*.key" -o -name "*.csr" \) -exec chmod 600 {} \;
-        securityContext:
-          runAsUser: 0
-          capabilities:
-            add:
-            - CHOWN
-            - FOWNER
-            - DAC_OVERRIDE
-        volumeMounts:
-        - mountPath: /usr/share/opensearch/config
-          name: os01-cm0
-        - mountPath: /usr/share/opensearch/config/certificates
-          name: certificates-volume
-        - mountPath: /usr/share/opensearch/data
-          name: os-data
       containers:
       - name: os01
         image: opensearchproject/opensearch:3
@@ -85,23 +53,19 @@ spec:
           value: os01
         - name: node.roles
           value: "data,ingest,master"
-        - name: plugins.security.ssl.http.pemcert_filepath
-          value: /usr/share/opensearch/config/certificates/os01/os01.pem
-        - name: plugins.security.ssl.http.pemkey_filepath
-          value: /usr/share/opensearch/config/certificates/os01/os01.key
-        - name: plugins.security.ssl.transport.pemcert_filepath
-          value: /usr/share/opensearch/config/certificates/os01/os01.pem
-        - name: plugins.security.ssl.transport.pemkey_filepath
-          value: /usr/share/opensearch/config/certificates/os01/os01.key
+        - name: bootstrap.memory_lock
+          value: "false"
         resources:
           requests:
-            memory: "1Gi"
+            memory: "2Gi"
             cpu: "500m"
           limits:
-            memory: "1Gi"
+            memory: "2Gi"
             cpu: "1"
         ports:
         - containerPort: 9200
+          protocol: TCP
+        - containerPort: 9300
           protocol: TCP
         - containerPort: 9600
           protocol: TCP
@@ -109,8 +73,6 @@ spec:
         - mountPath: /usr/share/opensearch/config/opensearch.yml
           name: os01-cm0
           subPath: opensearch.yml
-        - mountPath: /usr/share/opensearch/config/certificates
-          name: certificates-volume
         - mountPath: /usr/share/opensearch/data
           name: os-data
       volumes:
@@ -120,9 +82,6 @@ spec:
             path: opensearch.yml
           name: os01-cm0
         name: os01-cm0
-      - name: certificates-volume
-        persistentVolumeClaim:
-          claimName: certificates-pvc
       - name: os-data
         persistentVolumeClaim:
           claimName: os-data1

@@ -26,8 +26,10 @@ spec:
         - env:
             - name: DISABLE_INSTALL_DEMO_CONFIG
               value: "true"
+            - name: DISABLE_SECURITY_DASHBOARDS_PLUGIN
+              value: "true"
             - name: OPENSEARCH_HOSTS
-              value: '["https://os01:9200","https://os02:9200","https://os03:9200"]'
+              value: '["http://os01:9200","http://os02:9200","http://os03:9200"]'
           image: opensearchproject/opensearch-dashboards:3
           name: kibana
           ports:
@@ -37,8 +39,6 @@ spec:
             - mountPath: /usr/share/opensearch-dashboards/config/opensearch_dashboards.yml
               name: kibana-cm1
               subPath: opensearch_dashboards.yml
-            - mountPath: /usr/share/opensearch-dashboards/config/certificates
-              name: certificates-volume
       restartPolicy: Always
       volumes:
         - configMap:
@@ -47,6 +47,3 @@ spec:
                 path: opensearch_dashboards.yml
             name: kibana-cm1
           name: kibana-cm1
-        - name: certificates-volume
-          persistentVolumeClaim:
-            claimName: certificates-pvc
