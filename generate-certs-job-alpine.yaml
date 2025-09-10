@@ -1,0 +1,137 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: generate-certificates-alpine
+spec:
+  # Set active deadline to 5 minutes since no package installation needed
+  activeDeadlineSeconds: 300
+  # Allow up to 2 retry attempts
+  backoffLimit: 2
+  template:
+    spec:
+      securityContext:
+        runAsUser: 0  # Run as root to handle permissions
+        fsGroup: 1000  # OpenSearch group
+        fsGroupChangePolicy: "OnRootMismatch"
+      containers:
+      - name: cert-generator
+        # Alpine comes with OpenSSL pre-installed, avoiding network dependency
+        image: alpine:3.18
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "300m"
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e  # Exit on any error
+          
+          echo "Starting certificate generation at $(date)"
+          echo "OpenSSL version: $(openssl version)"
+          
+          echo "Changing to certificates directory..."
+          cd /certs-output
+          
+          echo "Creating certificate directories..."
+          mkdir -p ca os-dashboards os01 os02 os03
+          
+          echo "Generating Root CA..."
+          openssl genrsa -out ca/ca.key 2048
+          openssl req -new -x509 -sha256 -days 1095 \
+            -subj "/C=FR/ST=IDF/L=PARIS/O=EXAMPLE/CN=CA" \
+            -key ca/ca.key -out ca/ca.pem
+          
+          echo "Generating Admin certificates..."
+          openssl genrsa -out ca/admin-temp.key 2048
+          openssl pkcs8 -inform PEM -outform PEM \
+            -in ca/admin-temp.key -topk8 -nocrypt \
+            -v1 PBE-SHA1-3DES -out ca/admin.key
+          openssl req -new \
+            -subj "/C=FR/ST=IDF/L=PARIS/O=EXAMPLE/CN=ADMIN" \
+            -key ca/admin.key -out ca/admin.csr
+          openssl x509 -req -in ca/admin.csr \
+            -CA ca/ca.pem -CAkey ca/ca.key -CAcreateserial \
+            -sha256 -out ca/admin.pem -days 1095
+          rm ca/admin-temp.key ca/admin.csr
+          
+          echo "Generating OpenSearch Dashboards certificates..."
+          openssl genrsa -out os-dashboards/os-dashboards-temp.key 2048
+          openssl pkcs8 -inform PEM -outform PEM \
+            -in os-dashboards/os-dashboards-temp.key -topk8 -nocrypt \
+            -v1 PBE-SHA1-3DES -out os-dashboards/os-dashboards.key
+          openssl req -new \
+            -subj "/C=FR/ST=IDF/L=PARIS/O=EXAMPLE/CN=os-dashboards" \
+            -key os-dashboards/os-dashboards.key \
+            -out os-dashboards/os-dashboards.csr
+          openssl x509 -req -in os-dashboards/os-dashboards.csr \
+            -CA ca/ca.pem -CAkey ca/ca.key -CAcreateserial \
+            -sha256 -out os-dashboards/os-dashboards.pem -days 1095
+          rm os-dashboards/os-dashboards-temp.key os-dashboards/os-dashboards.csr
+          
+          echo "Generating node certificates..."
+          for NODE_NAME in os01 os02 os03; do
+              echo "Generating certificate for $NODE_NAME..."
+              openssl genrsa -out "$NODE_NAME/$NODE_NAME-temp.key" 2048
+              openssl pkcs8 -inform PEM -outform PEM \
+                -in "$NODE_NAME/$NODE_NAME-temp.key" -topk8 -nocrypt \
+                -v1 PBE-SHA1-3DES -out "$NODE_NAME/$NODE_NAME.key"
+              openssl req -new \
+                -subj "/C=FR/ST=IDF/L=PARIS/O=EXAMPLE/CN=$NODE_NAME" \
+                -key "$NODE_NAME/$NODE_NAME.key" \
+                -out "$NODE_NAME/$NODE_NAME.csr"
+              
+              # Create SAN extension file
+              cat > "$NODE_NAME/san.ext" << EOF
+          subjectAltName=DNS:localhost,IP:127.0.0.1,DNS:$NODE_NAME
+          EOF
+              
+              openssl x509 -req -extfile "$NODE_NAME/san.ext" \
+                -in "$NODE_NAME/$NODE_NAME.csr" \
+                -CA ca/ca.pem -CAkey ca/ca.key -CAcreateserial \
+                -sha256 -out "$NODE_NAME/$NODE_NAME.pem" -days 1095
+              rm "$NODE_NAME/$NODE_NAME-temp.key" "$NODE_NAME/$NODE_NAME.csr" "$NODE_NAME/san.ext"
+          done
+          
+          echo "Setting permissions and ownership..."
+          # Set base permissions for directories
+          find . -type d -exec chmod 755 {} \;
+          
+          # Set permissions for certificates and keys
+          find . -name "*.pem" -exec chmod 644 {} \;
+          find . -name "*.key" -exec chmod 600 {} \;
+          
+          # Set ownership with fallback
+          if chown -R 1000:1000 . 2>/dev/null; then
+            echo "Successfully set ownership to 1000:1000"
+          else
+            echo "Warning: Could not set ownership to 1000:1000, setting world-readable permissions"
+            chmod -R a+r .
+            find . -name "*.key" -exec chmod 600 {} \;
+          fi
+          
+          echo "Certificate generation completed successfully at $(date)"
+          echo ""
+          echo "Generated certificates:"
+          find . -name "*.pem" -o -name "*.key" | sort
+          echo ""
+          echo "Certificate verification:"
+          for cert in ca/ca.pem ca/admin.pem os-dashboards/os-dashboards.pem os01/os01.pem os02/os02.pem os03/os03.pem; do
+            if [ -f "$cert" ]; then
+              echo "✓ $cert - $(openssl x509 -in "$cert" -noout -subject)"
+            else
+              echo "✗ $cert - MISSING"
+            fi
+          done
+          
+        volumeMounts:
+        - name: certs-volume
+          mountPath: /certs-output
+      restartPolicy: Never
+      volumes:
+      - name: certs-volume
+        persistentVolumeClaim:
+          claimName: certificates-pvc
