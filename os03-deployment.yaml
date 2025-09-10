@@ -16,9 +16,6 @@ spec:
     type: Recreate
   template:
     metadata:
-      annotations:
-        kompose.cmd: kompose --file docker-compose.yml convert
-        kompose.version: 1.35.0 (HEAD)
       labels:
         io.kompose.service: os03
     spec:
@@ -27,100 +24,76 @@ spec:
         runAsGroup: 1000
         fsGroup: 1000
       initContainers:
-      - name: permissions-init
-        image: busybox:1.35
-        command:
-        - /bin/sh
-        - -c
-        - |
-          umask 077
-          mkdir -p /usr/share/opensearch/config/certificates/{os01,os02,os03,ca} /usr/share/opensearch/data
-          mkdir -p /usr/share/opensearch/logs
-          chown -R 1000:1000 /usr/share/opensearch
-          find /usr/share/opensearch/config -type d -exec chmod 700 {} \;
-          find /usr/share/opensearch/config -type f -exec chmod 600 {} \;
-          find /usr/share/opensearch/data -type d -exec chmod 700 {} \;
-          find /usr/share/opensearch/logs -type d -exec chmod 700 {} \;
-          chmod 700 /usr/share/opensearch/config
-          chmod 600 /usr/share/opensearch/config/opensearch.yml
-          find /usr/share/opensearch/config/certificates -type f \( -name "*.pem" -o -name "*.key" -o -name "*.csr" \) -exec chmod 600 {} \;
+      - name: fix-permissions
+        image: busybox
+        command: ["sh", "-c", "chown -R 1000:1000 /usr/share/opensearch/data"]
         securityContext:
           runAsUser: 0
-          capabilities:
-            add:
-            - CHOWN
-            - FOWNER
-            - DAC_OVERRIDE
         volumeMounts:
-        - mountPath: /usr/share/opensearch/config
+        - name: os-data3
+          mountPath: /usr/share/opensearch/data
+      containers:
+      - name: os03
+        image: opensearchproject/opensearch:3
+        resources:
+          limits:
+            cpu: 2
+            memory: 4Gi
+          requests:
+            cpu: 500m
+            memory: 3Gi
+        securityContext:
+          runAsUser: 1000
+          runAsGroup: 1000
+          capabilities:
+            drop:
+            - ALL
+        env:
+        - name: DISABLE_INSTALL_DEMO_CONFIG
+          value: "true"
+        - name: DISABLE_SECURITY_PLUGIN
+          value: "true"
+        - name: _JAVA_OPTIONS
+          value: "-XX:UseSVE=0 -Xms2g -Xmx2g"
+        - name: OPENSEARCH_JAVA_OPTS
+          value: "-Xms2g -Xmx2g"
+        - name: bootstrap.memory_lock
+          value: "false"
+        - name: cluster.name
+          value: os-cluster
+        - name: cluster.initial_master_nodes
+          value: "os01,os02,os03"
+        - name: discovery.seed_hosts
+          value: "os01,os02,os03"
+        - name: network.host
+          value: "0.0.0.0"
+        - name: node.name
+          value: os03
+        - name: node.roles
+          value: "data,ingest,master"
+        ports:
+        - containerPort: 9200
+          protocol: TCP
+        - containerPort: 9600
+          protocol: TCP
+        volumeMounts:
+        - mountPath: /usr/share/opensearch/config/opensearch.yml
           name: os03-cm0
+          subPath: opensearch.yml
         - mountPath: /usr/share/opensearch/config/certificates
           name: certificates-volume
         - mountPath: /usr/share/opensearch/data
           name: os-data3
-      containers:
-        - securityContext:
-            capabilities:
-              add:
-                - IPC_LOCK
-                - SYS_RESOURCE
-            runAsUser: 1000
-            runAsNonRoot: true
-          resources:
-            requests:
-              memory: "2Gi"
-              cpu: "500m"
-            limits:
-              memory: "2Gi"
-              cpu: "1000m"
-          env:
-            - name: DISABLE_INSTALL_DEMO_CONFIG
-              value: "true"
-            - name: JAVA_HOME
-              value: /usr/share/opensearch/jdk
-            - name: OPENSEARCH_JAVA_OPTS
-              value: "-XX:UseSVE=0 -Xms1g -Xmx1g -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/usr/share/opensearch/data"
-            - name: bootstrap.memory_lock
-              value: "true"
-            - name: MEMORY_LOCK
-              value: "true"
-            - name: cluster.initial_master_nodes
-              value: os01,os02,os03
-            - name: discovery.seed_hosts
-              value: os01,os02,os03
-            - name: network.host
-              value: 0.0.0.0
-            - name: node.name
-              value: os03
-            - name: plugins.security.ssl.http.pemcert_filepath
-              value: /usr/share/opensearch/config/certificates/os03/os03.pem
-            - name: plugins.security.ssl.http.pemkey_filepath
-              value: /usr/share/opensearch/config/certificates/os03/os03.key
-            - name: plugins.security.ssl.transport.pemcert_filepath
-              value: /usr/share/opensearch/config/certificates/os03/os03.pem
-            - name: plugins.security.ssl.transport.pemkey_filepath
-              value: /usr/share/opensearch/config/certificates/os03/os03.key
-          image: opensearchproject/opensearch:3
-          name: os03
-          volumeMounts:
-            - mountPath: /usr/share/opensearch/config/opensearch.yml
-              name: os03-cm0
-              subPath: opensearch.yml
-            - mountPath: /usr/share/opensearch/data
-              name: os-data3
-            - mountPath: /usr/share/opensearch/config/certificates
-              name: certificates-volume
-      restartPolicy: Always
       volumes:
-        - configMap:
-            items:
-              - key: opensearch.yml
-                path: opensearch.yml
-            name: os03-cm0
+      - configMap:
+          items:
+          - key: opensearch.yml
+            path: opensearch.yml
           name: os03-cm0
-        - name: os-data3
-          persistentVolumeClaim:
-            claimName: os-data3
-        - name: certificates-volume
-          persistentVolumeClaim:
-            claimName: certificates-pvc
+        name: os03-cm0
+      - name: certificates-volume
+        persistentVolumeClaim:
+          claimName: certificates-pvc
+      - name: os-data3
+        persistentVolumeClaim:
+          claimName: os-data3

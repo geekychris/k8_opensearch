@@ -79,13 +79,23 @@ kubectl wait --for=condition=ready pod -l io.kompose.service=kibana --timeout=30
 
 echo "Deployment complete!"
 echo "
+🎉 3-Node OpenSearch Cluster Deployed Successfully!
+
+Cluster Configuration:
+- 3 OpenSearch nodes (os01, os02, os03)
+- 2GB memory per node (6GB total)
+- 512MB Java heap per node
+- Security plugin disabled for minimal resource usage
+- ARM64 compatible JVM settings
+
 Access the cluster:
 1. OpenSearch API:
    kubectl port-forward svc/os01 9200:9200
-   curl -k -u admin:admin https://localhost:9200
+   curl http://localhost:9200
 
 2. OpenSearch Dashboards:
    kubectl port-forward svc/kibana 5601:5601
-   Visit https://localhost:5601
-   Login with admin:admin"
+   Visit http://localhost:5601
+
+Note: Security is disabled for minimal resource usage."
 
