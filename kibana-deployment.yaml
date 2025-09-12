@@ -30,7 +30,7 @@ spec:
               value: "true"
             - name: OPENSEARCH_HOSTS
               value: '["http://os01:9200","http://os02:9200","http://os03:9200"]'
-          image: opensearchproject/opensearch-dashboards:3
+          image: opensearchproject/opensearch-dashboards:3.2.0
           name: kibana
           ports:
             - containerPort: 5601

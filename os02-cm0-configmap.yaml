@@ -9,6 +9,13 @@ data:
     cluster.routing.allocation.disk.threshold_enabled: true
     cluster.routing.allocation.disk.watermark.low: 93%
     cluster.routing.allocation.disk.watermark.high: 95%
+
+    # k-NN plugin settings for vector search optimization
+    knn.memory.circuit_breaker.enabled: true
+    knn.memory.circuit_breaker.limit: 60%
+    knn.cache.item.expiry.enabled: true
+    knn.cache.item.expiry.minutes: 3m
+    knn.algo_param.index_thread_qty: 1
 kind: ConfigMap
 metadata:
   annotations:

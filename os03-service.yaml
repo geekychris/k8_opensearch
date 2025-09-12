@@ -8,16 +8,20 @@ metadata:
     io.kompose.service: os03
   name: os03
 spec:
+  type: NodePort
   ports:
     - name: "9200"
       port: 9200
       targetPort: 9200
+      nodePort: 30922
     - name: "9300"
       port: 9300
       targetPort: 9300
+      nodePort: 30932
     - name: "9600"
       port: 9600
       targetPort: 9600
+      nodePort: 30962
   selector:
     io.kompose.service: os03
 
