@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="K8 Opensearch logo" width="180">
+</p>
+
 # OpenSearch Kubernetes Deployment
 
 This directory contains a complete OpenSearch cluster deployment for Kubernetes with a 3-node setup and OpenSearch Dashboards.
